@@ -147,10 +147,14 @@ class DeepQAgent():
             target = R + gamma*max_a[Q(obs_{k+1}, a)]
 
         """
-        # TODO: compute targets
-        target_q_values = ...
+
+        # compute targets
+        with torch.no_grad():
+            next_q_values = self.qnet_target(next_obs).max(1)[0]
+            target_q_values = rewards + self.gamma*next_q_values*(1-terminated)
+
         return target_q_values
-            
+    
 
 
 
@@ -168,18 +172,52 @@ class DeepQAgent():
         rewards = torch.FloatTensor(rewards).to(self.device)
         terminated = torch.FloatTensor(terminated).to(self.device)
         
-        # TODO: compute q_values
-        q_values = ...
+        # compute q-values for current observation
+        q_values = self.qnet_local(obs).gather(1, actions.unsqueeze(dim=1)).squeeze()
 
+        # compute targets
         target_q_values = self.compute_targets(next_obs, rewards, terminated)
 
-        # TODO: compute loss
-        loss = self.criterion(...)
+        # compute loss and update (don't forget to detach the targets from the grad graph)
+        loss = self.criterion(q_values, target_q_values)
 
-        # TODO: update network weights via backpropagation
+        # update network weights
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
 
 
     def update_target_network(self):
-        # TODO: copy local network parameters to target network from time to time or mix them slowly
-        pass
+        """Soft update model parameters.
+        θ_target = τ*θ_local + (1 - τ)*θ_target
+        """
+        for target_param, local_param in \
+            zip(self.qnet_target.parameters(), self.qnet_local.parameters()):
+            
+            target_param.data.copy_(
+                self.tau*local_param.data + (1.0-self.tau)*target_param.data
+            )
 
+
+
+
+
+class DoubleDeepQAgent(DeepQAgent):
+
+    def compute_targets(
+            self,
+            next_obs: torch.FloatTensor,
+            rewards: torch.FloatTensor,
+            terminated: torch.FloatTensor,
+            ) -> torch.FloatTensor:
+
+        # compute targets
+        with torch.no_grad():
+
+            next_actions = self.qnet_local(next_obs).argmax(dim=1)
+            next_q_values = self.qnet_target(next_obs).gather(dim=1, index=next_actions.unsqueeze(dim=1)).squeeze()
+            target_q_values = rewards + self.gamma*next_q_values*(1 - terminated)
+
+        return target_q_values
+    
